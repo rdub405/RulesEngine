@@ -1,0 +1,187 @@
+#
+# This is a Shiny web application. You can run the application by clicking
+# the 'Run App' button above.
+#
+# Find out more about building applications with Shiny here:
+#
+#    http://shiny.rstudio.com/
+#
+
+library(shiny)
+library(shinythemes)
+library(validate)
+library(RODBC)
+library(magrittr)
+library(assertr)
+library(dplyr)
+library(lubridate)
+library(scales)
+library(DT)
+library(reshape)
+
+dbhandle <- odbcDriverConnect("driver=SQL Server;server=OKCHQSQLP03")
+WLM.data <- sqlQuery(dbhandle,paste("select * from  [WellWorkflowX_CLR].[dbo].[CLR_WLM_WELL] where Region = 'South' and District = 'SCOOP'"))
+odbcClose(dbhandle)
+
+WLM.data <- WLM.data %>% mutate(
+    SpudDate= parse_date_time(SpudDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY")),
+    BigRigStartDate= parse_date_time(BigRigStartDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY")),
+    RigReleaseDate= parse_date_time(RigReleaseDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY")),
+    CompletionStartDate= parse_date_time(CompletionStartDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY")),
+    CompletedDate= parse_date_time(CompletedDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY")),
+    FirstDateofProduction= parse_date_time(FirstDateofProduction,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY")),
+    FirstSalesDateGas= parse_date_time(FirstSalesDateGas,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY")),
+    FirstSalesDateOil= parse_date_time(FirstSalesDateOil,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY"))
+)
+
+FieldList <- c("EntityID", "WellName", "Operator", "OperatedFlag", "BottomHoleLatitude", "BottomHoleLongitude", "APINumber10", "State", "County", "SurfaceSection",
+               "SurfaceTownship", "SurfaceRange", "SpudDate", "BigRigStartDate", "RigReleaseDate", "CompletionStartDate", "CompletedDate",
+               "FirstDateofProduction", "FirstSalesDateGas", "FirstSalesDateOil")
+
+DQMVal <- validator(
+    oplist := c("ISO", "OP", "YES"),
+    oplist2 := c("OSO", "NONOP", "NO"),
+    bhlatval := nchar(sub('.*\\.', '', BottomHoleLatitude)),
+    bhLongVal := nchar(sub('.*\\.', '', BottomHoleLongitude)),
+    BHLatDec =  bhl >= 6,
+    BHLongValid = BottomHoleLongitude >= -180 & BottomHoleLongitude <= 180,
+    BHLatValid =  BottomHoleLatitude >= -90 & BottomHoleLatitude <= 90,
+    BHLongDec = bhl >= 6,
+    APIState = if(!is.na(APINumber10)) !is.na(State),
+    STRState = if(!is.na(SurfaceSection) & !is.na(SurfaceRange) & !is.na(SurfaceTownship)) !is.na(State),
+    APICounty = if(!is.na(APINumber10)) !is.na(County),
+    SDFormat =  if(!is.na(SpudDate)) !is.na(parse_date_time(SpudDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    BRSDFormat =  if(!is.na(BigRigStartDate)) !is.na(parse_date_time(BigRigStartDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    RRDFormat = if(!is.na(RigReleaseDate)) !is.na(parse_date_time(RigReleaseDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    CSDFormat =  if(!is.na(CompletionStartDate)) !is.na(parse_date_time(CompletionStartDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    CEDFormat = if(!is.na(CompletedDate)) !is.na(parse_date_time(CompletedDate,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    FDPFormat = if(!is.na(FirstDateofProduction)) !is.na(parse_date_time(FirstDateofProduction,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    FSDGFormat = if(!is.na(FirstSalesDateGas)) !is.na(parse_date_time(FirstSalesDateGas,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    FSDOFormat = if(!is.na(FirstSalesDateOil)) !is.na(parse_date_time(FirstSalesDateOil,orders=c("bdY_HM", "mdY_HM", "mdY_HMS", "mdY", "Ymd_HMS"))) == T,
+    ProdStatFDP = if(toupper(FacilityLifecycleStatus) == 'PRODUCING') !is.na(FirstDateofProduction),
+    ProdStatCED = if(toupper(FacilityLifecycleStatus) == 'PRODUCING') !is.na(CompletedDate),
+    CompStatRRD = if(toupper(FacilityLifecycleStatus) == 'COMPLETING') !is.na(RigReleaseDate),
+    CompStatCSD = if(toupper(FacilityLifecycleStatus) == 'COMPLETING') !is.na(CompletionStartDate),
+    DrillStatSD = if(toupper(FacilityLifecycleStatus) == 'DRILLING') !is.na(SpudDate),
+    SDBRSD = SpudDate <= BigRigStartDate,
+    SDRRD = SpudDate <= RigReleaseDate,
+    SDCSD = SpudDate <= CompletionStartDate,
+    SDCED = SpudDate < CompletedDate,
+    SDFDP = SpudDate <= FirstDateofProduction,
+    SDFSG = SpudDate <= FirstSalesDateGas,
+    SDFSO = SpudDate <= FirstSalesDateOil,
+    BRSDSD = BigRigStartDate > SpudDate,
+    BRSDRRD = BigRigStartDate <= RigReleaseDate,
+    BRSDCSD = BigRigStartDate <= CompletionStartDate,
+    BRSDCED = BigRigStartDate < CompletedDate,
+    BRSDFDP = BigRigStartDate <= FirstDateofProduction,
+    BRSDFSDG = BigRigStartDate <= FirstSalesDateGas,
+    BRSDFSDO = BigRigStartDate <= FirstSalesDateOil,
+    RRDSD = RigReleaseDate > SpudDate,
+    RRDBRSD = RigReleaseDate > BigRigStartDate,
+    RRDCSD = RigReleaseDate <= CompletionStartDate,
+    RRDCED = RigReleaseDate < CompletedDate,
+    RRDFDP = RigReleaseDate <= FirstDateofProduction,
+    RRDFSDG = RigReleaseDate <= FirstSalesDateGas,
+    RRDFSDO = RigReleaseDate <= FirstSalesDateOil,
+    CSDSP = CompletionStartDate > SpudDate,
+    CSDBRSD = CompletionStartDate > BigRigStartDate,
+    CSDRRD = CompletionStartDate > RigReleaseDate,
+    CSDCED = CompletionStartDate < CompletedDate,
+    CSDFDP = CompletionStartDate <= FirstDateofProduction,
+    CSDFSDG = CompletionStartDate <= FirstSalesDateGas,
+    CSDFSDO = CompletionStartDate <= FirstSalesDateOil,
+    CEDSP = CompletedDate > SpudDate,
+    CEDBRSD = CompletedDate > BigRigStartDate,
+    CEDRRD = CompletedDate > RigReleaseDate,
+    CEDCSD = CompletedDate > CompletionStartDate,
+    CEDFDP = CompletedDate <= FirstDateofProduction,
+    CEDFSDG = CompletedDate <= FirstSalesDateGas,
+    CEDFSDO = CompletedDate <= FirstSalesDateOil,
+    FDPSD = FirstDateofProduction > SpudDate,
+    FDPBRSD = FirstDateofProduction > BigRigStartDate,
+    FDPRRD = FirstDateofProduction > RigReleaseDate,
+    FDPCSD = FirstDateofProduction > CompletionStartDate,
+    FDPCED = FirstDateofProduction > CompletedDate,
+    FDPFSDG = FirstDateofProduction <= FirstSalesDateGas,
+    FDPFSDO = FirstDateofProduction <= FirstSalesDateOil,
+    FSDGSP = FirstSalesDateGas > SpudDate,
+    FSDGBRSD = FirstSalesDateGas > BigRigStartDate,
+    FSDGRRD = FirstSalesDateGas > RigReleaseDate,
+    FSDGCSD = FirstSalesDateGas > CompletionStartDate,
+    FSDGCED = FirstSalesDateGas > CompletedDate,
+    FSDGFDP = FirstSalesDateGas > FirstDateofProduction,
+    FSDOSP = FirstSalesDateOil > SpudDate,
+    FSDOBRSD = FirstSalesDateOil > BigRigStartDate,
+    FSDORRD = FirstSalesDateOil > RigReleaseDate,
+    FSDOCSD = FirstSalesDateOil > CompletionStartDate,
+    FSDOCED = FirstSalesDateOil > CompletedDate,
+    FSDOFDP = FirstSalesDateOil > FirstDateofProduction,
+    CLROPflag = if(toupper(Operator) == 'CLR') toupper(OperatedFlag) %in% oplist,
+    NONOPflag = if(toupper(Operator) != 'CLR') toupper(OperatedFlag) %in% oplist2
+)
+
+confrontValues <- WLM.data %>% confront(DQMVal)
+
+ResultsTbl <- confrontValues %>% aggregate(by='record') %>% as.data.frame() %>% mutate(API = WLM.data$APINumber10) 
+
+RulesTbl <- confrontValues %>% summary() %>%  as.data.frame() %>% mutate(ruleName = name) %>% select(ruleName, expression)
+
+AllTestResults <- confrontValues %>% values() %>% as.data.frame() %>% mutate(API = WLM.data$APINumber10, WellName = WLM.data$WellName, EntityID = WLM.data$EntityID) %>% 
+    melt(id.var = c('API', 'WellName', 'EntityID')) %>% filter(value != 'NA') %>% arrange(API, WellName, variable) 
+
+SummaryTest <- AllTestResults %>% group_by(API, WellName, EntityID ) %>% summarise(TotPass = sum(value), TotNum = n()) %>% mutate(RecordScore = (TotPass/TotNum)) %>% as.data.frame() %>% arrange(RecordScore)
+
+sample <- rbind(head(SummaryTest, 10), SummaryTest[60:70,],SummaryTest[850:860, ])
+
+total.sample <- WLM.data %>% select(FieldList) %>% inner_join(sample, by=c("APINumber10" = "API")) %>% 
+    mutate(RecordScore = round(RecordScore * 100, 3)) %>% 
+    select ("EntityID.x", "WellName.x", "RecordScore", "TotPass", "TotNum", "Operator", "OperatedFlag", "BottomHoleLatitude", "BottomHoleLongitude", "APINumber10", "State", "County", "SurfaceSection",
+            "SurfaceTownship", "SurfaceRange", "SpudDate", "BigRigStartDate", "RigReleaseDate", "CompletionStartDate", "CompletedDate",
+            "FirstDateofProduction", "FirstSalesDateGas", "FirstSalesDateOil")
+       
+# Define UI for application
+ui <- fluidPage(title='DQM',
+                fluidRow(column(
+                    width=12,
+                    DT::dataTableOutput(outputId = 'wellTable'))),
+                fluidRow(column(
+                    width=5,
+                DT::dataTableOutput(outputId = 'total.Sample')),
+                column(
+                    width=4,
+                    DT::dataTableOutput(outputId = 'rulesTbl'))),
+                theme = shinytheme(theme = 'yeti')
+               )
+
+# Define server logic
+server <- function(input, output, session) {
+    vals <- reactiveValues()
+    vals$API <- NULL
+   
+     observe({
+        vals$API <- total.sample %>% slice(as.integer(input$wellTable_rows_selected)) %>% select(APINumber10) %>% unlist() %>% as.character()
+        vals$Var <- rank() %>% slice(as.integer(input$total.Sample_rows_selected)) %>% select(variable) %>% unlist() %>% as.character()
+        
+        })
+    
+     rank <- reactive({
+         AllTestResults <- AllTestResults %>% arrange(value)
+         AllTestResults[AllTestResults$API == vals$API,]
+     })
+     
+     rank2 <- reactive({
+         RulesTbl[RulesTbl$ruleName == vals$Var,]
+     })
+     
+    output$wellTable <- DT::renderDataTable({
+        DT::datatable(total.sample, selection = 'single', rownames = FALSE) %>%  formatStyle('RecordScore', backgroundColor = styleInterval(c(75, 90), c('red', 'yellow', '')))})
+    output$total.Sample <- DT::renderDataTable({
+        DT::datatable(rank(), selection = 'single', rownames = FALSE, options = list(lengthMenu = c(5, 10, 15, 20), pageLength=20))})
+    output$rulesTbl <- DT::renderDataTable({
+        DT::datatable(rank2(), selection = 'single', rownames = FALSE)})
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
