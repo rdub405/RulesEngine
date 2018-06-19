@@ -43,10 +43,10 @@ DQMVal <- validator(
     oplist2 := c("OSO", "NONOP", "NO"),
     bhlatval := nchar(sub('.*\\.', '', BottomHoleLatitude)),
     bhLongVal := nchar(sub('.*\\.', '', BottomHoleLongitude)),
-    BHLatDec =  bhl >= 6,
+    BHLatDec =  bhlatval >= 6,
     BHLongValid = BottomHoleLongitude >= -180 & BottomHoleLongitude <= 180,
     BHLatValid =  BottomHoleLatitude >= -90 & BottomHoleLatitude <= 90,
-    BHLongDec = bhl >= 6,
+    BHLongDec = bhLongVal >= 6,
     APIState = if(!is.na(APINumber10)) !is.na(State),
     STRState = if(!is.na(SurfaceSection) & !is.na(SurfaceRange) & !is.na(SurfaceTownship)) !is.na(State),
     APICounty = if(!is.na(APINumber10)) !is.na(County),
@@ -125,7 +125,7 @@ confrontValues <- WLM.data %>% confront(DQMVal)
 
 ResultsTbl <- confrontValues %>% aggregate(by='record') %>% as.data.frame() %>% mutate(API = WLM.data$APINumber10) 
 
-RulesTbl <- confrontValues %>% summary() %>%  as.data.frame() %>% mutate(ruleName = name) %>% select(ruleName, expression)
+RulesTbl <- confrontValues %>% summary() %>%  as.data.frame() %>% mutate(ruleName = rule) %>% select(ruleName, expression)
 
 AllTestResults <- confrontValues %>% values() %>% as.data.frame() %>% mutate(API = WLM.data$APINumber10, WellName = WLM.data$WellName, EntityID = WLM.data$EntityID) %>% 
     melt(id.var = c('API', 'WellName', 'EntityID')) %>% filter(value != 'NA') %>% arrange(API, WellName, variable) 
