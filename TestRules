@@ -19,8 +19,8 @@ library(scales)
 library(DT)
 library(reshape)
 
-dbhandle <- odbcDriverConnect("driver=SQL Server;server=OKCHQSQLP03")
-WLM.data <- sqlQuery(dbhandle,paste("select * from  [WellWorkflowX_CLR].[dbo].[CLR_WLM_WELL] where Region = 'South' and District = 'SCOOP'"))
+dbhandle <- odbcDriverConnect("driver=SQL Server;server=servername")
+WLM.data <- sqlQuery(dbhandle,paste("select * from  table"))
 odbcClose(dbhandle)
 
 WLM.data <- WLM.data %>% mutate(
